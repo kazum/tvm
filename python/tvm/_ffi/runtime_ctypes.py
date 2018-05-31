@@ -110,6 +110,7 @@ class TVMContext(ctypes.Structure):
         'nvptx': 2,
         'cl': 4,
         'opencl': 4,
+        'sdaccel': 4,
         'vulkan': 7,
         'metal': 8,
         'vpi': 9,
