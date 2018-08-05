@@ -124,15 +124,6 @@ class OpenCLWorkspace : public DeviceAPI {
   std::vector<cl_device_id> devices;
   // the queues
   std::vector<cl_command_queue> queues;
-  // Number of registered kernels
-  // Used to register kernel into the workspace.
-  size_t num_registered_kernels{0};
-  // The version counter, used
-  size_t timestamp{0};
-  // Ids that are freed by kernels.
-  std::vector<size_t> free_kernel_ids;
-  // the mutex for initialization
-  std::mutex mu;
   // destructor
   ~OpenCLWorkspace() {
     if (context != nullptr) {
@@ -191,17 +182,8 @@ class OpenCLWorkspace : public DeviceAPI {
 /*! \brief Thread local workspace */
 class OpenCLThreadEntry {
  public:
-  // The kernel entry and version.
-  struct KTEntry {
-    // The kernel handle.
-    cl_kernel kernel{nullptr};
-    // timestamp used to recognize stale kernel
-    size_t version{0};
-  };
   /*! \brief The current context */
   TVMContext context;
-  /*! \brief The thread-local kernel table */
-  std::vector<KTEntry> kernel_table;
   /*! \brief workspace pool */
   WorkspacePool pool;
   // constructor
@@ -219,17 +201,8 @@ class OpenCLThreadEntry {
 }  // namespace cl
 
 // Module to support thread-safe multi-device execution.
-// OpenCL runtime is a bit tricky because clSetKernelArg is not thread-safe
-// To make the call thread-safe, we create a thread-local kernel table
-// and lazily install new kernels into the kernel table when the kernel is called.
-// The kernels are recycled when the module get destructed.
 class OpenCLModuleNode : public ModuleNode {
  public:
-  // Kernel table reference entry.
-  struct KTRefEntry {
-    size_t kernel_id;
-    size_t version;
-  };
   explicit OpenCLModuleNode(std::string data,
                             std::string fmt,
                             std::unordered_map<std::string, FunctionInfo> fmap,
@@ -257,8 +230,7 @@ class OpenCLModuleNode : public ModuleNode {
   // install a new kernel to thread local entry
   cl_kernel InstallKernel(cl::OpenCLWorkspace* w,
                           cl::OpenCLThreadEntry* t,
-                          const std::string& func_name,
-                          const KTRefEntry& e);
+                          const std::string& func_name);
 
  protected:
   // The workspace, need to keep reference to use it in destructor.
@@ -280,8 +252,6 @@ class OpenCLModuleNode : public ModuleNode {
   cl_program program_{nullptr};
   // build info
   std::vector<bool> device_built_flag_;
-  // kernel id cache
-  std::unordered_map<std::string, KTRefEntry> kid_map_;
   // kernels build so far.
   std::vector<cl_kernel> kernels_;
 };

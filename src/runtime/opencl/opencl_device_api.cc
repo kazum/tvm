@@ -230,8 +230,6 @@ bool MatchPlatformInfo(
 void OpenCLWorkspace::Init(const std::string& type_key, const std::string& device_type,
                            const std::string& platform_name) {
   if (initialized_) return;
-  std::lock_guard<std::mutex> lock(this->mu);
-  if (initialized_) return;
   initialized_ = true;
   if (context != nullptr) return;
   // matched platforms

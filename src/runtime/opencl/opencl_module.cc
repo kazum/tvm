@@ -18,14 +18,12 @@ class OpenCLWrappedFunc {
   // initialize the OpenCL function.
   void Init(OpenCLModuleNode* m,
             std::shared_ptr<ModuleNode> sptr,
-            OpenCLModuleNode::KTRefEntry entry,
             std::string func_name,
             std::vector<size_t> arg_size,
             const std::vector<std::string>& thread_axis_tags)  {
     w_ = m->GetGlobalWorkspace().get();
     m_ = m;
     sptr_ = sptr;
-    entry_ = entry;
     func_name_ = func_name;
     arg_size_ = arg_size;
     thread_axis_cfg_.Init(arg_size.size(), thread_axis_tags);
@@ -34,15 +32,18 @@ class OpenCLWrappedFunc {
   void operator()(TVMArgs args,
                   TVMRetValue* rv,
                   void** void_args) const {
+    // Because clSetKernelArg is not thread-safe, we create a thread-local kernel table
+    // to make the concurrent clSetKernelArg calls operate on different cl_kernel objects.
+    static thread_local std::unordered_map<std::string, cl_kernel> kernel_table;
     cl::OpenCLThreadEntry* t = w_->GetThreadEntry();
     // get the kernel from thread local kernel table.
-    if (entry_.kernel_id >= t->kernel_table.size()) {
-      t->kernel_table.resize(entry_.kernel_id + 1);
-    }
-    const auto& e = t->kernel_table[entry_.kernel_id];
-    cl_kernel kernel = e.kernel;
-    if (kernel == nullptr || e.version != entry_.version) {
-      kernel = m_->InstallKernel(w_, t, func_name_, entry_);
+    cl_kernel kernel = nullptr;
+    auto it = kernel_table.find(func_name_);
+    if (it != kernel_table.end()) kernel = it->second;
+
+    if (kernel == nullptr) {
+      kernel = m_->InstallKernel(w_, t, func_name_);
+      kernel_table[func_name_] = kernel;
     }
     // setup arguments.
     for (cl_uint i = 0; i < arg_size_.size(); ++i) {
@@ -69,8 +70,6 @@ class OpenCLWrappedFunc {
   OpenCLModuleNode* m_;
   // resource handle
   std::shared_ptr<ModuleNode> sptr_;
-  // global kernel id in the kernel table.
-  OpenCLModuleNode::KTRefEntry entry_;
   // The name of the function.
   std::string func_name_;
   // convert code for void argument
@@ -80,13 +79,6 @@ class OpenCLWrappedFunc {
 };
 
 OpenCLModuleNode::~OpenCLModuleNode() {
-  {
-    // free the kernel ids in global table.
-    std::lock_guard<std::mutex> lock(workspace_->mu);
-    for (auto& kv : kid_map_) {
-      workspace_->free_kernel_ids.push_back(kv.second.kernel_id);
-    }
-  }
   // free the kernels
   for (cl_kernel k : kernels_) {
     OPENCL_CALL(clReleaseKernel(k));
@@ -124,8 +116,7 @@ PackedFunc OpenCLModuleNode::GetFunction(
     }
   }
   // initialize the wrapped func.
-  f.Init(this, sptr_to_self, kid_map_.at(name),
-         name, arg_size, info.thread_axis_tags);
+  f.Init(this, sptr_to_self, name, arg_size, info.thread_axis_tags);
   return PackFuncVoidAddr(f, info.arg_types);
 }
 
@@ -159,26 +150,11 @@ void OpenCLModuleNode::Init() {
   workspace_->Init();
   CHECK(workspace_->context != nullptr) << "No OpenCL device";
   device_built_flag_.resize(workspace_->devices.size(), false);
-  // initialize the kernel id, need to lock global table.
-  std::lock_guard<std::mutex> lock(workspace_->mu);
-  for (const auto& kv : fmap_) {
-    const std::string& key = kv.first;
-    KTRefEntry e;
-    if (workspace_->free_kernel_ids.size() != 0) {
-      e.kernel_id = workspace_->free_kernel_ids.back();
-      workspace_->free_kernel_ids.pop_back();
-    } else {
-      e.kernel_id = workspace_->num_registered_kernels++;
-    }
-    e.version = workspace_->timestamp++;
-    kid_map_[key] = e;
-  }
 }
 
 cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w,
                                           cl::OpenCLThreadEntry* t,
-                                          const std::string& func_name,
-                                          const KTRefEntry& e) {
+                                          const std::string& func_name) {
   std::lock_guard<std::mutex> lock(build_lock_);
   int device_id = t->context.device_id;
   if (!device_built_flag_[device_id]) {
@@ -221,8 +197,6 @@ cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w,
   cl_int err;
   cl_kernel kernel = clCreateKernel(program_, func_name.c_str(), &err);
   OPENCL_CHECK_ERROR(err);
-  t->kernel_table[e.kernel_id].kernel = kernel;
-  t->kernel_table[e.kernel_id].version = e.version;
   kernels_.push_back(kernel);
   return kernel;
 }
