@@ -32,19 +32,8 @@ class OpenCLWrappedFunc {
   void operator()(TVMArgs args,
                   TVMRetValue* rv,
                   void** void_args) const {
-    // Because clSetKernelArg is not thread-safe, we create a thread-local kernel table
-    // to make the concurrent clSetKernelArg calls operate on different cl_kernel objects.
-    static thread_local std::unordered_map<std::string, cl_kernel> kernel_table;
     cl::OpenCLThreadEntry* t = w_->GetThreadEntry();
-    // get the kernel from thread local kernel table.
-    cl_kernel kernel = nullptr;
-    auto it = kernel_table.find(func_name_);
-    if (it != kernel_table.end()) kernel = it->second;
-
-    if (kernel == nullptr) {
-      kernel = m_->InstallKernel(w_, t, func_name_);
-      kernel_table[func_name_] = kernel;
-    }
+    cl_kernel kernel = m_->InstallKernel(w_, t, func_name_);
     // setup arguments.
     for (cl_uint i = 0; i < arg_size_.size(); ++i) {
       OPENCL_CALL(clSetKernelArg(kernel, i, arg_size_[i], void_args[i]));
@@ -85,6 +74,19 @@ OpenCLModuleNode::~OpenCLModuleNode() {
   }
   if (program_) {
     OPENCL_CALL(clReleaseProgram(program_));
+  }
+  {
+    std::lock_guard<std::mutex> lock(build_lock_);
+    for (auto kernels : fpga_kernels_) {
+      for (cl_kernel k : kernels) {
+        OPENCL_CALL(clReleaseKernel(k));
+      }
+    }
+    for (auto program : fpga_programs_) {
+      if (program) {
+        OPENCL_CALL(clReleaseProgram(program));
+      }
+    }
   }
 }
 
@@ -155,8 +157,23 @@ void OpenCLModuleNode::Init() {
 cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w,
                                           cl::OpenCLThreadEntry* t,
                                           const std::string& func_name) {
-  std::lock_guard<std::mutex> lock(build_lock_);
+  // Because clSetKernelArg is not thread-safe, we create a thread-local kernel table
+  // to make the concurrent clSetKernelArg calls operate on different cl_kernel objects.
+  static thread_local std::unordered_map<std::string, cl_kernel> kernel_table;
+  static thread_local std::vector<std::unordered_map<std::string, cl_kernel>> fpga_kernel_table;
   int device_id = t->context.device_id;
+  // get the kernel from thread local kernel table.
+  {
+    cl_kernel kernel;
+    if (fmt_ == "cl") {
+      kernel = kernel_table[func_name];
+    } else {
+      kernel = fpga_kernel_table[device_id][func_name];
+    }
+    if (kernel != nullptr) return kernel;
+  }
+
+  std::lock_guard<std::mutex> lock(build_lock_);
   if (!device_built_flag_[device_id]) {
     // create program
     if (fmt_ == "cl") {
@@ -168,12 +185,30 @@ cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w,
         OPENCL_CHECK_ERROR(err);
       }
     } else if (fmt_ == "xclbin" || fmt_ == "awsxclbin" || fmt_ == "aocx") {
-      const unsigned char* s = (const unsigned char *)data_.c_str();
-      size_t len = data_.length();
-      cl_int err;
-      cl_device_id dev = w->devices[device_id];
-      program_ = clCreateProgramWithBinary(w->context, 1, &dev, &len, &s, NULL, &err);
-      OPENCL_CHECK_ERROR(err);
+      if (w->programs[device_id] && w->programs[device_id] != fpga_programs_[device_id]) {
+        // unload program
+        for (cl_kernel k : w->kernels[device_id]) {
+          OPENCL_CALL(clReleaseKernel(k));
+        }
+        w->kernels[device_id].clear();
+        OPENCL_CALL(clReleaseProgram(w->programs[device_id]));
+        // TODO: how to notify this event to the owner of the program?
+      }
+      if (fpga_programs_[device_id] == nullptr || fpga_programs_[device_id] != w->programs[device_id]) {
+        if (fpga_programs_[device_id]) {
+          // these kernels should have been released.
+          fpga_kernels_[device_id].clear();
+          fpga_kernel_table[device_id].clear();
+        }
+        // create program
+        const unsigned char* s = (const unsigned char *)data_.c_str();
+        size_t len = data_.length();
+        cl_int err;
+        cl_device_id dev = w->devices[device_id];
+        fpga_programs_[device_id] = clCreateProgramWithBinary(w->context, 1, &dev, &len, &s, NULL, &err);
+        OPENCL_CHECK_ERROR(err);
+        w->programs[device_id] = fpga_programs_[device_id];
+      }
     } else {
       LOG(FATAL) << "Unknown OpenCL format " << fmt_;
     }
@@ -197,7 +232,13 @@ cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w,
   cl_int err;
   cl_kernel kernel = clCreateKernel(program_, func_name.c_str(), &err);
   OPENCL_CHECK_ERROR(err);
-  kernels_.push_back(kernel);
+  if (fmt_ == "cl") {
+    kernels_.push_back(kernel);
+    kernel_table[func_name] = kernel;
+  } else {
+    fpga_kernels_[device_id].push_back(kernel);
+    fpga_kernel_table[device_id][func_name] = kernel;
+  }
   return kernel;
 }
 

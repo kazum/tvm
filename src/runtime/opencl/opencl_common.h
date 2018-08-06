@@ -122,6 +122,10 @@ class OpenCLWorkspace : public DeviceAPI {
   std::string device_type;
   // the devices
   std::vector<cl_device_id> devices;
+  // the loaded programs
+  std::vector<cl_program> programs;
+  // the loaded programs
+  std::vector<std::vector<cl_kernel>> kernels;
   // the queues
   std::vector<cl_command_queue> queues;
   // destructor
@@ -250,10 +254,14 @@ class OpenCLModuleNode : public ModuleNode {
   std::string source_;
   // the binary data
   cl_program program_{nullptr};
+  // the binary data for FPGA
+  std::vector<cl_program> fpga_programs_;
   // build info
   std::vector<bool> device_built_flag_;
   // kernels build so far.
   std::vector<cl_kernel> kernels_;
+  // kernels build so far.
+  std::vector<std::vector<cl_kernel>> fpga_kernels_;
 };
 
 }  // namespace runtime
