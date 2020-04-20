@@ -95,7 +95,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     llvm::raw_fd_ostream dest(file_name, ecode, llvm::sys::fs::F_None);
     CHECK_EQ(ecode.value(), 0) << "Cannot open file: " << file_name
                                << " " << ecode.message();
-    if (fmt == "o" || fmt == "obj") {
+    if (fmt == "o" || fmt == "obj" || fmt == "wasm") {
 #if TVM_LLVM_VERSION <= 60
       std::unique_ptr<llvm::Module> m = llvm::CloneModule(mptr_);
 #else
