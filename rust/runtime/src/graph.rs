@@ -184,10 +184,11 @@ impl<'m, 't> GraphExecutor<'m, 't> {
     }
 
     /// Runs the computation graph.
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> &Self {
         self.op_execs.iter().for_each(|op_exec| {
             op_exec();
         });
+        self
     }
 
     /// Allocates `Storages` for each `storage_id` and returns `Tensor`s to hold each output.
@@ -293,14 +294,15 @@ impl<'m, 't> GraphExecutor<'m, 't> {
         Ok(op_execs)
     }
 
-    pub fn load_params(&mut self, params: HashMap<String, Tensor>) {
+    pub fn load_params(&mut self, params: HashMap<String, Tensor>) -> &mut Self {
         params.into_iter().for_each(|(name, param)| {
             self.set_input(name, param);
-        })
+        });
+        self
     }
 
     #[allow(clippy::if_same_then_else)]
-    pub fn set_input<S: AsRef<str>>(&mut self, name: S, value: Tensor) {
+    pub fn set_input<S: AsRef<str>>(&mut self, name: S, value: Tensor) -> &mut Self {
         if let Some(idx) = self.get_input_index(name.as_ref()) {
             // TODO: consider `new_with_params` to avoid ever allocating
             let ptr = self.tensors[idx].data.as_ptr();
@@ -320,6 +322,7 @@ impl<'m, 't> GraphExecutor<'m, 't> {
         } else {
             println!("Unexpected input `{}`", name.as_ref());
         }
+        self
     }
 
     /// Returns the graph input with name `name`, if it exists.
