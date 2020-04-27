@@ -27,6 +27,9 @@ categories = ["api-bindings", "science"]
 authors = ["TVM Contributors"]
 edition = "2018"
 
+[lib]
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 crossbeam = "0.7.3"
 failure = "0.1"
