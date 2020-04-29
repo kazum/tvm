@@ -147,7 +147,10 @@ impl ThreadPool {
 
     fn run_worker(queue: Receiver<Task>) {
         loop {
-            let task = queue.recv().expect("should recv");
+            let task = match queue.recv() {
+                Ok(v) => v,
+                Err(_) => break,
+            };
             let result = task.run();
             if result == <i32>::min_value() {
                 break;
