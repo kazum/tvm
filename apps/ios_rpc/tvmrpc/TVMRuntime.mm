@@ -52,6 +52,11 @@
 #include "../../../src/runtime/metal/metal_module.mm"
 // CoreML
 #include "../../../src/runtime/contrib/coreml/coreml_runtime.mm"
+// Remote
+#include "../../../src/runtime/contrib/remote/wrap_graph_runtime.cc"
+#include "../../../src/runtime/contrib/remote/remote_module.cc"
+#include "../../../src/runtime/rpc/rpc_device_api.cc"
+#include "../../../src/runtime/contrib/sort/sort.cc"
 
 namespace dmlc {
 // Override logging mechanism
