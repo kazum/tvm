@@ -15,20 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-[workspace]
-members = [
-	"common",
-	"macros",
-	"runtime",
-	"runtime/tests/test_tvm_basic",
-	"runtime/tests/test_tvm_dso",
-	"runtime/tests/test_wasm32",
-	"runtime/tests/test_wasi_lib",
-	"runtime/tests/test_nn",
-	"frontend",
-	"frontend/tests/basics",
-	"frontend/tests/callback",
-	"frontend/examples/resnet",
-	"tvm-sys",
-	"tvm-rt"
-]
+[package]
+name = "test-wasi-lib"
+version = "0.0.0"
+license = "Apache-2.0"
+authors = ["TVM Contributors"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ndarray="0.12"
+tvm-runtime = { path = "../../" }
