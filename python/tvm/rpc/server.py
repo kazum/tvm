@@ -83,8 +83,7 @@ def _serve_loop(sock, addr, load_library, work_path=None):
     sockfd = sock.fileno()
     temp = _server_env(load_library, work_path)
     _ffi_api.ServerLoop(sockfd)
-    if not work_path:
-        temp.remove()
+    temp.remove()
     logger.info("Finish serving %s", addr)
 
 def _parse_server_opt(opts):
@@ -204,6 +203,7 @@ def _listen_loop(sock, port, rpc_key, tracker_addr, load_library, custom_addr):
         server_proc.start()
         # close from our side.
         conn.close()
+        continue  # FIXME: handle concurrent request temporarily
         # wait until server process finish or timeout
         server_proc.join(opts.get("timeout", None))
         if server_proc.is_alive():
@@ -248,6 +248,7 @@ def _connect_proxy_loop(addr, key, load_library):
             process.deamon = True
             process.start()
             sock.close()
+            continue  # FIXME: handle concurrent request temporarily
             process.join(opts.get("timeout", None))
             if process.is_alive():
                 logger.info("Timeout in RPC session, kill..")
