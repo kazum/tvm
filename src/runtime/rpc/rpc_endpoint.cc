@@ -200,9 +200,7 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
 
   // Endian aware IO handling
   using Stream::Read;
-  using Stream::ReadArray;
   using Stream::Write;
-  using Stream::WriteArray;
 
   bool Read(RPCCode* code) {
     int32_t cdata;
@@ -214,6 +212,15 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
     int32_t cdata = static_cast<int>(code);
     this->Write(cdata);
   }
+  // read function, update pending_request_bytes_
+  size_t Read(void* data, size_t size) final {
+    CHECK_LE(size, pending_request_bytes_);
+    reader_->Read(data, size);
+    pending_request_bytes_ -= size;
+    return size;
+  }
+  // wriite the data to the channel.
+  void Write(const void* data, size_t size) final { writer_->Write(data, size); }
 
   template <typename T>
   T* ArenaAlloc(int count) {
@@ -273,7 +280,7 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
       return;
     } else {
       CHECK_EQ(init_header_step_, 1);
-      this->ReadArray(dmlc::BeginPtr(*remote_key_), remote_key_->length());
+      this->Read(dmlc::BeginPtr(*remote_key_), remote_key_->length());
       this->SwitchToState(kRecvPacketNumBytes);
     }
   }
@@ -398,7 +405,7 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
 
       this->Write(packet_nbytes);
       this->Write(code);
-      this->WriteArray(data_ptr, num_bytes);
+      this->Write(data_ptr, num_bytes);
       this->SwitchToState(kRecvPacketNumBytes);
     };
 
@@ -448,7 +455,7 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
     // as the cpu pointer without allocating a temp space.
     if (ctx.device_type == kDLCPU && sess->IsLocalSession()) {
       char* dptr = reinterpret_cast<char*>(handle) + offset;
-      this->ReadArray(dptr, num_bytes);
+      this->Read(dptr, num_bytes);
 
       if (!DMLC_IO_NO_ENDIAN_SWAP) {
         dmlc::ByteSwap(dptr, elem_bytes, num_bytes / elem_bytes);
@@ -457,7 +464,7 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
       this->SwitchToState(kRecvPacketNumBytes);
     } else {
       char* temp_data = this->ArenaAlloc<char>(num_bytes);
-      this->ReadArray(temp_data, num_bytes);
+      this->Read(temp_data, num_bytes);
 
       if (!DMLC_IO_NO_ENDIAN_SWAP) {
         dmlc::ByteSwap(temp_data, elem_bytes, num_bytes / elem_bytes);
@@ -606,15 +613,6 @@ class RPCEndpoint::EventHandler : public dmlc::Stream {
     return serving_session_.get();
   }
   // Utility functions
-  // Internal read function, update pending_request_bytes_
-  size_t Read(void* data, size_t size) final {
-    CHECK_LE(size, pending_request_bytes_);
-    reader_->Read(data, size);
-    pending_request_bytes_ -= size;
-    return size;
-  }
-  // wriite the data to the channel.
-  void Write(const void* data, size_t size) final { writer_->Write(data, size); }
   // Number of pending bytes requests
   size_t pending_request_bytes_{0};
   // The ring buffer to read data from.
@@ -769,7 +767,7 @@ void RPCEndpoint::InitRemoteSession(TVMArgs args) {
   handler_->Write(packet_nbytes);
   handler_->Write(code);
   handler_->Write(length);
-  handler_->WriteArray(protocol_ver.data(), length);
+  handler_->Write(protocol_ver.data(), length);
   handler_->SendPackedSeq(args.values, args.type_codes, args.num_args, true);
 
   code = HandleUntilReturnEvent(true, [](TVMArgs args) {});
@@ -817,7 +815,7 @@ void RPCEndpoint::CopyToRemote(void* from, size_t from_offset, void* to, size_t 
   handler_->Write(size);
   handler_->Write(ctx_to);
   handler_->Write(type_hint);
-  handler_->WriteArray(reinterpret_cast<char*>(from) + from_offset, data_size);
+  handler_->Write(reinterpret_cast<char*>(from) + from_offset, data_size);
 
   CHECK(HandleUntilReturnEvent(true, [](TVMArgs) {}) == RPCCode::kReturn);
 }
@@ -843,7 +841,7 @@ void RPCEndpoint::CopyFromRemote(void* from, size_t from_offset, void* to, size_
 
   TVMRetValue rv;
   CHECK(HandleUntilReturnEvent(true, [](TVMArgs) {}) == RPCCode::kCopyAck);
-  handler_->ReadArray(reinterpret_cast<char*>(to) + to_offset, data_size);
+  handler_->Read(reinterpret_cast<char*>(to) + to_offset, data_size);
   handler_->FinishCopyAck();
 }
 
