@@ -22,6 +22,7 @@ from tvm.contrib import graph_runtime
 from tvm.relay.expr_functor import ExprMutator
 from tvm.relay.op.annotation import compiler_begin, compiler_end
 import numpy as np
+import os
 
 
 inff = 3e+38
@@ -688,7 +689,8 @@ def remove_batchnorm(expr):
 
 def get_network(shape):
     image = relay.var("image", shape=shape, dtype='float32') # image: Tensor[(3, 640, 480), float32]
-    loaded_params = relay.load_param_dict(bytearray(open("mask_rcnn-small.params", "rb").read()))
+    param_path = "/".join([os.path.dirname(__file__), "mask_rcnn.params"])
+    loaded_params = relay.load_param_dict(bytearray(open(param_path, "rb").read()))
     params = {}
     for k, v in loaded_params.items():
         params[int(k)] = relay.const(v)
